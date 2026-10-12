@@ -1,0 +1,130 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=1.8cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+
+\definecolor{accent}{RGB}{35,83,145}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\renewcommand{\arraystretch}{1.10}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Video Compression HW1}
+\rhead{Lab Report}
+\cfoot{\thepage}
+\setlength{\headheight}{14pt}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE\bfseries Video Compression Homework 1}\\[0.25em]
+    {\large Spatial Coding Lab Report}\\[0.5em]
+    \textbf{Hung-I Yang} \hspace{1em} 112550097
+\end{center}
+
+\section{Implementation Overview}
+
+The standard codec processes 512$\times$512, 8-bit grayscale images as 4096 non-overlapping 8$\times$8 blocks. The encoder applies level shifting, a separable orthonormal DCT, weighted quantization, zigzag scanning, and VALUE/EOB Huffman coding. The decoder reverses these steps with inverse zigzag, dequantization, IDCT, level restoration, rounding, and clipping. Internal zeros are encoded as \texttt{VALUE(0)}, while EOB replaces only trailing zeros.
+
+The experiments use both Lena and Mandril. Rate is measured from the complete bitstream, including the 4-byte header and final padding:
+\[
+    \mathrm{BPP}=\frac{8\times\text{file size in bytes}}{H\times W},
+    \qquad
+    \mathrm{PSNR}=10\log_{10}\!\left(\frac{255^2}{\mathrm{MSE}}\right).
+\]
+
+\section{Experiment 1: Quantization Table}
+
+The provided table $Q$ was scaled by $s\in\{0.5,1,2\}$ using
+\[
+    Q_s=\max\!\left(1,\operatorname{rint}(sQ)\right).
+\]
+The same table was used by the encoder and decoder. The $s=1$ case is the standard implementation.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Image & Scale & BPP & PSNR (dB) & MSE \\
+\midrule
+Lena    & \textbf{0.5} & \textbf{1.266205} & \textbf{37.865965} & \textbf{10.628792} \\
+Lena    & 1.0 & 0.837616 & 35.808515 & 17.069817 \\
+Lena    & 2.0 & 0.572144 & 33.704943 & 27.706783 \\
+\midrule
+Mandril & \textbf{0.5} & \textbf{1.944489} & \textbf{37.499634} & \textbf{11.564236} \\
+Mandril & 1.0 & 1.454590 & 34.203934 & 24.699432 \\
+Mandril & 2.0 & 1.045013 & 30.991261 & 51.755238 \\
+\bottomrule
+\end{tabular}
+\caption{Rate and distortion for scaled quantization tables.}
+\end{table}
+
+Smaller quantization steps preserve more DCT precision, so PSNR increases, but fewer coefficients become zero and BPP also increases. Larger steps produce the opposite result. Mandril consistently requires more bits than Lena because its stronger texture produces more significant high-frequency coefficients. Its PSNR also drops more sharply when $Q$ is doubled.
+
+\section{Experiment 2: Zigzag and Raster Scans}
+
+The standard zigzag order was compared with row-major raster order. The decoder used the matching inverse order in each case, so coefficient positions after decoding were unchanged.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Image & Scan order & BPP & PSNR (dB) & MSE \\
+\midrule
+Lena    & \textbf{Zigzag} & \textbf{0.837616} & 35.808515 & 17.069817 \\
+Lena    & Raster & 1.012146 & 35.808515 & 17.069817 \\
+\midrule
+Mandril & \textbf{Zigzag} & \textbf{1.454590} & 34.203934 & 24.699432 \\
+Mandril & Raster & 1.797150 & 34.203934 & 24.699432 \\
+\bottomrule
+\end{tabular}
+\caption{Rate and distortion for zigzag and raster scans.}
+\end{table}
+
+PSNR and MSE are identical because scan order is a reversible permutation. Zigzag places low-frequency coefficients first and groups the likely high-frequency zeros near the end, allowing EOB to terminate each block earlier. Relative to raster order, zigzag reduces BPP by 17.24\% for Lena and 19.06\% for Mandril.
+
+\section{Experiment 3: Separable and Direct DCT}
+
+The standard transform computes $F=C(fC^T)$ in two 1D stages. The direct implementation computes every output coefficient with the required double summation:
+\[
+    F_{p,q}=\sum_{x=0}^{7}\sum_{y=0}^{7}
+    C_{p,x}f_{x,y}C_{q,y}.
+\]
+Only DCT computation was timed with \texttt{time.perf\_counter()}. Each method received one warm-up call and was then measured three times over all 4096 blocks. The reported value is the median on an Apple M1 Pro using Python 3.12.13 and NumPy 2.5.4.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Image & Method & Median time (s) & BPP & Payload bits \\
+\midrule
+Lena    & \textbf{Two-stage 1D} & \textbf{0.008258} & 0.837616 & 219544 \\
+Lena    & Direct 2D    & 3.058908 & 0.837616 & 219544 \\
+\midrule
+Mandril & \textbf{Two-stage 1D} & \textbf{0.007563} & 1.454590 & 381278 \\
+Mandril & Direct 2D    & 3.064902 & 1.454559 & 381270 \\
+\bottomrule
+\end{tabular}
+\caption{DCT-only timing and resulting bitstream rate.}
+\end{table}
+
+The two-stage transform is approximately 370$\times$ faster for Lena and 405$\times$ faster for Mandril in this Python implementation. The first-block maximum coefficient difference is below $4\times10^{-13}$ for both images, confirming that the transforms are numerically equivalent. Lena produces the same bitstream length. Mandril differs by only 8 payload bits and one file byte because the two arithmetic orders can place a coefficient on opposite sides of a rounding boundary; the bitrate is therefore effectively unchanged.
+
+\section{Conclusion}
+
+Quantization controls the main rate-distortion tradeoff: finer steps improve quality at a higher bitrate. Zigzag scanning changes rate but not reconstruction quality because it makes trailing-zero EOB coding more effective. Finally, DCT separability preserves the same transform result and bitrate while reducing computation time by roughly two orders of magnitude compared with explicit direct summation.
+
+\end{document}
